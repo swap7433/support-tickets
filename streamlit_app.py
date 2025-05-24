@@ -1,172 +1,275 @@
 import datetime
-import random
-
-import altair as alt
-import numpy as np
 import pandas as pd
 import streamlit as st
+import os
+import altair as alt
 
-# Show app title and description.
-st.set_page_config(page_title="Support tickets", page_icon="🎫")
-st.title("🎫 Support tickets")
-st.write(
-    """
-    This app shows how you can build an internal tool in Streamlit. Here, we are 
-    implementing a support ticket workflow. The user can create a ticket, edit 
-    existing tickets, and view some statistics.
-    """
-)
+# App configuration
+st.set_page_config(page_title="Support Tickets", page_icon="🎫")
 
-# Create a random Pandas dataframe with existing tickets.
+# Departments - added "Exam Cell"
+departments = ["Comp", "Mech", "Electronic", "Civil", "IT", "Exam Cell"]
+TICKET_FILE = "tickets.xlsx"
+POC_FILE = "poc_details.xlsx"
+
+# --- Load or initialize POC DataFrame ---
+def load_or_init_poc():
+    if os.path.exists(POC_FILE):
+        poc_df = pd.read_excel(POC_FILE)
+        # Ensure all departments present
+        missing_depts = [d for d in departments if d not in poc_df["Department"].values]
+        for md in missing_depts:
+            poc_df = pd.concat(
+                [poc_df, pd.DataFrame({"Department": [md], "POC Name": ["No Name"], "POC Phone": ["0000000000"]})],
+                ignore_index=True,
+            )
+        # Convert POC Phone to string to avoid Streamlit editing issues
+        poc_df["POC Phone"] = poc_df["POC Phone"].astype(str)
+        return poc_df
+    else:
+        # Initialize dummy POC details for all departments
+        data = {
+            "Department": departments,
+            "POC Name": ["No Name"] * len(departments),
+            "POC Phone": ["0000000000"] * len(departments),
+        }
+        poc_df = pd.DataFrame(data)
+        # Ensure POC Phone is string type
+        poc_df["POC Phone"] = poc_df["POC Phone"].astype(str)
+        poc_df.to_excel(POC_FILE, index=False)
+        return poc_df
+
+poc_df = load_or_init_poc()
+
+# Load or initialize DataFrame for tickets
 if "df" not in st.session_state:
+    if os.path.exists(TICKET_FILE):
+        st.session_state.df = pd.read_excel(TICKET_FILE)
+        # Keep only TICKET-1101, discard others
+        st.session_state.df = st.session_state.df[st.session_state.df["ID"] == "TICKET-1101"]
+        # Save filtered file to overwrite existing tickets
+        st.session_state.df.to_excel(TICKET_FILE, index=False)
+    else:
+        # Initialize with just one ticket TICKET-1101
+        data = {
+            "ID": ["TICKET-1101"],
+            "Issue": ["Sample issue for TICKET-1101"],
+            "Status": ["Open"],
+            "Priority": ["Medium"],
+            "Date Submitted": [datetime.date(2023, 6, 1)],
+            "Full Name": ["John Doe"],
+            "Mobile No": ["1234567890"],
+            "Department": ["Comp"],
+            "Resolution": [""],
+        }
+        st.session_state.df = pd.DataFrame(data)
+        st.session_state.df.to_excel(TICKET_FILE, index=False)
 
-    # Set seed for reproducibility.
-    np.random.seed(42)
+# Convert 'ID' column to string to avoid dtype issues
+st.session_state.df["ID"] = st.session_state.df["ID"].astype(str)
 
-    # Make up some fake issue descriptions.
-    issue_descriptions = [
-        "Network connectivity issues in the office",
-        "Software application crashing on startup",
-        "Printer not responding to print commands",
-        "Email server downtime",
-        "Data backup failure",
-        "Login authentication problems",
-        "Website performance degradation",
-        "Security vulnerability identified",
-        "Hardware malfunction in the server room",
-        "Employee unable to access shared files",
-        "Database connection failure",
-        "Mobile application not syncing data",
-        "VoIP phone system issues",
-        "VPN connection problems for remote employees",
-        "System updates causing compatibility issues",
-        "File server running out of storage space",
-        "Intrusion detection system alerts",
-        "Inventory management system errors",
-        "Customer data not loading in CRM",
-        "Collaboration tool not sending notifications",
-    ]
+# Sidebar for user role selection
+st.sidebar.title("Navigation")
+user_role = st.sidebar.selectbox("Select user type", ["User", "Admin"])
 
-    # Generate the dataframe with 100 rows/tickets.
-    data = {
-        "ID": [f"TICKET-{i}" for i in range(1100, 1000, -1)],
-        "Issue": np.random.choice(issue_descriptions, size=100),
-        "Status": np.random.choice(["Open", "In Progress", "Closed"], size=100),
-        "Priority": np.random.choice(["High", "Medium", "Low"], size=100),
-        "Date Submitted": [
-            datetime.date(2023, 6, 1) + datetime.timedelta(days=random.randint(0, 182))
-            for _ in range(100)
-        ],
-    }
-    df = pd.DataFrame(data)
+# =============== USER TAB ================
+if user_role == "User":
+    st.title("🎫 Support Ticket Portal")
 
-    # Save the dataframe in session state (a dictionary-like object that persists across
-    # page runs). This ensures our data is persisted when the app updates.
-    st.session_state.df = df
+    # --- Add Ticket Section ---
+    st.header("Add a ticket")
+    with st.form("add_ticket_form"):
+        full_name = st.text_input("Full Name")
+        mobile = st.text_input("Mobile No")
+        dept = st.selectbox("Department", departments)
+        issue = st.text_area("Describe the issue")
+        priority = st.selectbox("Priority", ["High", "Medium", "Low"])
+        submitted = st.form_submit_button("Submit")
 
+    if submitted:
+        # Calculate next ticket number
+        try:
+            recent_ticket_number = max(
+                st.session_state.df["ID"].str.split("-").str[1].astype(int)
+            )
+        except Exception:
+            recent_ticket_number = 1101  # fallback default
+        today = datetime.datetime.now().strftime("%Y-%m-%d")
+        df_new = pd.DataFrame(
+            [
+                {
+                    "ID": f"TICKET-{recent_ticket_number + 1}",
+                    "Issue": issue,
+                    "Status": "Open",
+                    "Priority": priority,
+                    "Date Submitted": today,
+                    "Full Name": full_name,
+                    "Mobile No": mobile,
+                    "Department": dept,
+                    "Resolution": "",
+                }
+            ]
+        )
+        st.session_state.df = pd.concat([df_new, st.session_state.df], axis=0)
+        st.session_state.df.to_excel(TICKET_FILE, index=False)
+        st.success("Ticket submitted!")
+        st.dataframe(df_new, use_container_width=True, hide_index=True)  # Shows new ticket
 
-# Show a section to add a new ticket.
-st.header("Add a ticket")
+        # Show POC details for submitted department
+        poc_row = poc_df[poc_df["Department"] == dept]
+        st.markdown(
+            f"### Contact POC for **{dept}** Department\n"
+            f"- **Name:** {poc_row['POC Name'].values[0]}\n"
+            f"- **Phone No:** {poc_row['POC Phone'].values[0]}"
+        )
 
-# We're adding tickets via an `st.form` and some input widgets. If widgets are used
-# in a form, the app will only rerun once the submit button is pressed.
-with st.form("add_ticket_form"):
-    issue = st.text_area("Describe the issue")
-    priority = st.selectbox("Priority", ["High", "Medium", "Low"])
-    submitted = st.form_submit_button("Submit")
-
-if submitted:
-    # Make a dataframe for the new ticket and append it to the dataframe in session
-    # state.
-    recent_ticket_number = int(max(st.session_state.df.ID).split("-")[1])
-    today = datetime.datetime.now().strftime("%m-%d-%Y")
-    df_new = pd.DataFrame(
-        [
-            {
-                "ID": f"TICKET-{recent_ticket_number+1}",
-                "Issue": issue,
-                "Status": "Open",
-                "Priority": priority,
-                "Date Submitted": today,
-            }
+    # --- Search Ticket Section ---
+    st.header("Search tickets")
+    search_term = st.text_input("Search by keyword or ticket ID")
+    if search_term:
+        result_df = st.session_state.df[
+            st.session_state.df["ID"].str.contains(search_term, case=False)
+            | st.session_state.df["Issue"].str.contains(search_term, case=False)
         ]
-    )
+        st.write(f"Found {len(result_df)} matching tickets:")
+        st.dataframe(result_df, use_container_width=True, hide_index=True)  # Shows all columns
 
-    # Show a little success message.
-    st.write("Ticket submitted! Here are the ticket details:")
-    st.dataframe(df_new, use_container_width=True, hide_index=True)
-    st.session_state.df = pd.concat([df_new, st.session_state.df], axis=0)
+# =============== ADMIN TAB ================
+elif user_role == "Admin":
+    st.title("🔐 Admin Dashboard")
+    dept_login = st.selectbox("Select Department", ["Super Admin"] + departments)
+    password = st.text_input("Enter admin password", type="password")
 
-# Show section to view and edit existing tickets in a table.
-st.header("Existing tickets")
-st.write(f"Number of tickets: `{len(st.session_state.df)}`")
+    if password == "admin123":  # Use secure method in production
+        st.success("Access granted")
 
-st.info(
-    "You can edit the tickets by double clicking on a cell. Note how the plots below "
-    "update automatically! You can also sort the table by clicking on the column headers.",
-    icon="✍️",
-)
+        # For departments other than super admin, filter tickets accordingly
+        if dept_login != "Super Admin":
+            df_filtered = st.session_state.df[
+                st.session_state.df["Department"] == dept_login
+            ].copy()
+        else:
+            df_filtered = st.session_state.df.copy()
 
-# Show the tickets dataframe with `st.data_editor`. This lets the user edit the table
-# cells. The edited data is returned as a new dataframe.
-edited_df = st.data_editor(
-    st.session_state.df,
-    use_container_width=True,
-    hide_index=True,
-    column_config={
-        "Status": st.column_config.SelectboxColumn(
-            "Status",
-            help="Ticket status",
-            options=["Open", "In Progress", "Closed"],
-            required=True,
-        ),
-        "Priority": st.column_config.SelectboxColumn(
-            "Priority",
-            help="Priority",
-            options=["High", "Medium", "Low"],
-            required=True,
-        ),
-    },
-    # Disable editing the ID and Date Submitted columns.
-    disabled=["ID", "Date Submitted"],
-)
+        # Admin Search box
+        search_term_admin = st.text_input("Search tickets (ID or keyword)", key="admin_search")
+        if search_term_admin:
+            df_filtered = df_filtered[
+                df_filtered["ID"].str.contains(search_term_admin, case=False)
+                | df_filtered["Issue"].str.contains(search_term_admin, case=False)
+            ]
 
-# Show some metrics and charts about the ticket.
-st.header("Statistics")
+        st.header(f"Tickets for {dept_login}")
+        st.write(f"Total Tickets: `{len(df_filtered)}`")
 
-# Show metrics side by side using `st.columns` and `st.metric`.
-col1, col2, col3 = st.columns(3)
-num_open_tickets = len(st.session_state.df[st.session_state.df.Status == "Open"])
-col1.metric(label="Number of open tickets", value=num_open_tickets, delta=10)
-col2.metric(label="First response time (hours)", value=5.2, delta=-1.5)
-col3.metric(label="Average resolution time (hours)", value=16, delta=2)
+        # Notification box bottom-right corner with ticket count
+        if len(df_filtered) > 0:
+            st.sidebar.markdown(
+                f"""
+                <div style="
+                    position: fixed; 
+                    bottom: 10px; 
+                    right: 10px; 
+                    background-color: #90ee90; 
+                    padding: 10px; 
+                    border-radius: 5px; 
+                    box-shadow: 0 0 5px gray;
+                    font-weight: bold;
+                    z-index: 9999;
+                ">
+                    {len(df_filtered)} ticket(s) in {dept_login} department
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-# Show two Altair charts using `st.altair_chart`.
-st.write("")
-st.write("##### Ticket status per month")
-status_plot = (
-    alt.Chart(edited_df)
-    .mark_bar()
-    .encode(
-        x="month(Date Submitted):O",
-        y="count():Q",
-        xOffset="Status:N",
-        color="Status:N",
-    )
-    .configure_legend(
-        orient="bottom", titleFontSize=14, labelFontSize=14, titlePadding=5
-    )
-)
-st.altair_chart(status_plot, use_container_width=True, theme="streamlit")
+        # Add some padding and bigger scrollbar to the data editor with custom CSS
+        st.markdown(
+            """
+            <style>
+            /* Increase padding for table cells */
+            div[data-testid="stDataEditorContainer"] div[data-baseweb="table-cell"] {
+                padding: 12px 15px !important;
+            }
+            /* Customize scrollbar */
+            div[data-testid="stDataEditorContainer"]::-webkit-scrollbar {
+                height: 16px;
+                width: 16px;
+            }
+            div[data-testid="stDataEditorContainer"]::-webkit-scrollbar-thumb {
+                background: #888;
+                border-radius: 8px;
+            }
+            div[data-testid="stDataEditorContainer"]::-webkit-scrollbar-thumb:hover {
+                background: #555;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
 
-st.write("##### Current ticket priorities")
-priority_plot = (
-    alt.Chart(edited_df)
-    .mark_arc()
-    .encode(theta="count():Q", color="Priority:N")
-    .properties(height=300)
-    .configure_legend(
-        orient="bottom", titleFontSize=14, labelFontSize=14, titlePadding=5
-    )
-)
-st.altair_chart(priority_plot, use_container_width=True, theme="streamlit")
+        # Show tickets data editor (non-editable fields remain disabled)
+        edited_df = st.data_editor(
+            df_filtered,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Status": st.column_config.SelectboxColumn(
+                    "Status", options=["Open", "In Progress", "Closed"], required=True
+                ),
+                "Priority": st.column_config.SelectboxColumn(
+                    "Priority", options=["High", "Medium", "Low"], required=True
+                ),
+                "Resolution": st.column_config.TextColumn("Resolution"),
+            },
+            disabled=[
+                "ID",
+                "Date Submitted",
+                "Issue",
+                "Full Name",
+                "Mobile No",
+                "Department",
+            ],
+            height=0,  # auto height, no vertical scrollbar
+        )
+
+        # Ensure 'ID' columns are strings for safe comparison
+        st.session_state.df["ID"] = st.session_state.df["ID"].astype(str)
+        edited_df["ID"] = edited_df["ID"].astype(str)
+
+        # Update main dataframe with edited values
+        for idx in edited_df.index:
+            ticket_id = edited_df.at[idx, "ID"]  # scalar string
+            st.session_state.df.loc[
+                st.session_state.df["ID"] == ticket_id,
+                ["Status", "Priority", "Resolution"]
+            ] = edited_df.loc[idx, ["Status", "Priority", "Resolution"]].values
+
+        # Save updates to Excel
+        st.session_state.df.to_excel(TICKET_FILE, index=False)
+        st.success("Tickets updated successfully!")
+
+        st.header("Edit Point of Contact (POC) Details (Super Admin only)")
+        if dept_login == "Super Admin":
+            poc_edited_df = st.data_editor(
+                poc_df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Department": st.column_config.TextColumn("Department"),
+                    "POC Name": st.column_config.TextColumn("POC Name"),
+                    "POC Phone": st.column_config.TextColumn("POC Phone"),
+                },
+                disabled=["Department"],  # Make Department readonly
+            )
+
+            # Save updated POC details
+            if st.button("Save POC Details"):
+                # Update poc_df in memory and save to Excel
+                poc_df.update(poc_edited_df)
+                poc_df.to_excel(POC_FILE, index=False)
+                st.success("POC details updated successfully!")
+
+    else:
+        st.error("Incorrect password")
+
