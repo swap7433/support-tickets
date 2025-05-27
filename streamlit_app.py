@@ -322,7 +322,6 @@ with tabs[2]:
             return "Sorry, I didn't understand your query. You can ask things like:\n- 'list all the tickets'\n- 'list all the POCs'\n- 'status of ticket-1101'", pd.DataFrame()
 
     user_input = st.text_input("Ask me something about tickets or POCs:")
-
     if user_input:
         answer_text, answer_df = handle_chat_input(user_input)
         st.session_state.chat_history.append(("User", user_input))
