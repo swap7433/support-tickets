@@ -1,13 +1,14 @@
-import datetime
+import datetime 
 import pandas as pd
 import streamlit as st
 import os
 import altair as alt
+import openai
 
 # App configuration
-st.set_page_config(page_title="Support Tickets", page_icon="🎫")
+st.set_page_config(page_title="Support Tickets", page_icon="🎫", layout="wide")
 
-# Departments - added "Exam Cell"
+# Departments
 departments = ["Comp", "Mech", "Electronic", "Civil", "IT", "Exam Cell"]
 TICKET_FILE = "tickets.xlsx"
 POC_FILE = "poc_details.xlsx"
@@ -16,66 +17,54 @@ POC_FILE = "poc_details.xlsx"
 def load_or_init_poc():
     if os.path.exists(POC_FILE):
         poc_df = pd.read_excel(POC_FILE)
-        # Ensure all departments present
         missing_depts = [d for d in departments if d not in poc_df["Department"].values]
         for md in missing_depts:
             poc_df = pd.concat(
                 [poc_df, pd.DataFrame({"Department": [md], "POC Name": ["No Name"], "POC Phone": ["0000000000"]})],
                 ignore_index=True,
             )
-        # Convert POC Phone to string to avoid Streamlit editing issues
         poc_df["POC Phone"] = poc_df["POC Phone"].astype(str)
         return poc_df
     else:
-        # Initialize dummy POC details for all departments
         data = {
             "Department": departments,
             "POC Name": ["No Name"] * len(departments),
             "POC Phone": ["0000000000"] * len(departments),
         }
         poc_df = pd.DataFrame(data)
-        # Ensure POC Phone is string type
         poc_df["POC Phone"] = poc_df["POC Phone"].astype(str)
         poc_df.to_excel(POC_FILE, index=False)
         return poc_df
 
 poc_df = load_or_init_poc()
 
-# Load or initialize DataFrame for tickets
 if "df" not in st.session_state:
     if os.path.exists(TICKET_FILE):
         st.session_state.df = pd.read_excel(TICKET_FILE)
-        # Keep only TICKET-1101, discard others (optional, can remove this filter if you want all tickets)
-        st.session_state.df = st.session_state.df[st.session_state.df["ID"] == "TICKET-1101"]
-        st.session_state.df.to_excel(TICKET_FILE, index=False)
     else:
-        # Initialize with just one ticket TICKET-1101
         data = {
-            "ID": ["TICKET-1101"],
-            "Issue": ["Sample issue for TICKET-1101"],
-            "Status": ["Open"],
-            "Priority": ["Medium"],
-            "Date Submitted": [datetime.date(2023, 6, 1)],
-            "Full Name": ["John Doe"],
-            "Mobile No": ["1234567890"],
-            "Department": ["Comp"],
-            "Resolution": [""],
+            "ID": [],
+            "Issue": [],
+            "Status": [],
+            "Priority": [],
+            "Date Submitted": [],
+            "Full Name": [],
+            "Mobile No": [],
+            "Department": [],
+            "Resolution": [],
         }
         st.session_state.df = pd.DataFrame(data)
         st.session_state.df.to_excel(TICKET_FILE, index=False)
-
-# Convert 'ID' column to string to avoid dtype issues
 st.session_state.df["ID"] = st.session_state.df["ID"].astype(str)
 
-# Sidebar for user role selection
-st.sidebar.title("Navigation")
-user_role = st.sidebar.selectbox("Select user type", ["User", "Admin"])
+
+# ---------- TAB-BASED NAVIGATION ----------
+tabs = st.tabs(["Submit Ticket", "Admin Panel", "Chatbot"])
+
 
 # =============== USER TAB ================
-if user_role == "User":
+with tabs[0]:
     st.title("🎫 Support Ticket Portal")
-
-    # --- Add Ticket Section ---
     st.header("Add a ticket")
     with st.form("add_ticket_form"):
         full_name = st.text_input("Full Name")
@@ -86,13 +75,12 @@ if user_role == "User":
         submitted = st.form_submit_button("Submit")
 
     if submitted:
-        # Calculate next ticket number
         try:
             recent_ticket_number = max(
                 st.session_state.df["ID"].str.split("-").str[1].astype(int)
             )
         except Exception:
-            recent_ticket_number = 1101  # fallback default
+            recent_ticket_number = 1101
         today = datetime.datetime.now().strftime("%Y-%m-%d")
         df_new = pd.DataFrame(
             [
@@ -112,9 +100,8 @@ if user_role == "User":
         st.session_state.df = pd.concat([df_new, st.session_state.df], axis=0)
         st.session_state.df.to_excel(TICKET_FILE, index=False)
         st.success("Ticket submitted!")
-        st.dataframe(df_new, use_container_width=True, hide_index=True)  # Shows new ticket
+        st.dataframe(df_new, use_container_width=True, hide_index=True)
 
-        # Show POC details for submitted department
         poc_row = poc_df[poc_df["Department"] == dept]
         st.markdown(
             f"### Contact POC for **{dept}** Department\n"
@@ -122,7 +109,6 @@ if user_role == "User":
             f"- **Phone No:** {poc_row['POC Phone'].values[0]}"
         )
 
-    # --- Search Ticket Section ---
     st.header("Search tickets")
     search_term = st.text_input("Search by keyword or ticket ID")
     if search_term:
@@ -131,18 +117,18 @@ if user_role == "User":
             | st.session_state.df["Issue"].str.contains(search_term, case=False)
         ]
         st.write(f"Found {len(result_df)} matching tickets:")
-        st.dataframe(result_df, use_container_width=True, hide_index=True)  # Shows all columns
+        st.dataframe(result_df, use_container_width=True, hide_index=True)
+
 
 # =============== ADMIN TAB ================
-elif user_role == "Admin":
+with tabs[1]:
     st.title("🔐 Admin Dashboard")
     dept_login = st.selectbox("Select Department", ["Super Admin"] + departments)
     password = st.text_input("Enter admin password", type="password")
 
-    if password == "admin123":  # Use secure method in production
+    if password == "admin123":
         st.success("Access granted")
 
-        # For departments other than super admin, filter tickets accordingly
         if dept_login != "Super Admin":
             df_filtered = st.session_state.df[
                 st.session_state.df["Department"] == dept_login
@@ -150,7 +136,6 @@ elif user_role == "Admin":
         else:
             df_filtered = st.session_state.df.copy()
 
-        # Admin Search box
         search_term_admin = st.text_input("Search tickets (ID or keyword)", key="admin_search")
         if search_term_admin:
             df_filtered = df_filtered[
@@ -158,7 +143,6 @@ elif user_role == "Admin":
                 | df_filtered["Issue"].str.contains(search_term_admin, case=False)
             ]
 
-        # Show department POC info for department admins (not super admin)
         if dept_login != "Super Admin":
             poc_row = poc_df[poc_df["Department"] == dept_login]
             st.markdown(
@@ -167,11 +151,9 @@ elif user_role == "Admin":
                 f"- **Phone No:** {poc_row['POC Phone'].values[0]}"
             )
 
-        # If Super Admin, show graphs + delete tickets tab
         if dept_login == "Super Admin":
             st.header("📊 Support Tickets Overview")
 
-            # Tickets count by Department
             dept_counts = df_filtered["Department"].value_counts().reset_index()
             dept_counts.columns = ["Department", "Count"]
             dept_chart = alt.Chart(dept_counts).mark_bar().encode(
@@ -182,7 +164,6 @@ elif user_role == "Admin":
             ).properties(title="Tickets by Department")
             st.altair_chart(dept_chart, use_container_width=True)
 
-            # Tickets count by Status
             status_counts = df_filtered["Status"].value_counts().reset_index()
             status_counts.columns = ["Status", "Count"]
             status_chart = alt.Chart(status_counts).mark_bar(color="#1f77b4").encode(
@@ -193,7 +174,6 @@ elif user_role == "Admin":
             ).properties(title="Tickets by Status")
             st.altair_chart(status_chart, use_container_width=True)
 
-            # Tickets count by Priority
             priority_counts = df_filtered["Priority"].value_counts().reset_index()
             priority_counts.columns = ["Priority", "Count"]
             priority_chart = alt.Chart(priority_counts).mark_bar(color="#ff7f0e").encode(
@@ -207,7 +187,6 @@ elif user_role == "Admin":
         st.header(f"Tickets for {dept_login}")
         st.write(f"Total Tickets: `{len(df_filtered)}`")
 
-        # Notification box bottom-right corner with ticket count
         if len(df_filtered) > 0:
             st.sidebar.markdown(
                 f"""
@@ -228,15 +207,12 @@ elif user_role == "Admin":
                 unsafe_allow_html=True,
             )
 
-        # Add some padding and bigger scrollbar to the data editor with custom CSS
         st.markdown(
             """
             <style>
-            /* Increase padding for table cells */
             div[data-testid="stDataEditorContainer"] div[data-baseweb="table-cell"] {
                 padding: 12px 15px !important;
             }
-            /* Customize scrollbar */
             div[data-testid="stDataEditorContainer"]::-webkit-scrollbar {
                 height: 16px;
                 width: 16px;
@@ -260,19 +236,14 @@ elif user_role == "Admin":
             hide_index=True,
         )
 
-        # Save changes back to session_state.df but only for tickets visible to this admin
         if dept_login == "Super Admin":
-            # Update entire df for superadmin edits
             st.session_state.df.update(edited_df)
         else:
-            # Update only rows for this department
             idxs = st.session_state.df[st.session_state.df["Department"] == dept_login].index
             st.session_state.df.loc[idxs, :] = edited_df.values
 
-        # Save updated dataframe to Excel
         st.session_state.df.to_excel(TICKET_FILE, index=False)
 
-        # POC edit only for Super Admin
         if dept_login == "Super Admin":
             st.header("📝 Edit POC Details")
             edited_poc = st.data_editor(
@@ -286,21 +257,88 @@ elif user_role == "Admin":
                 poc_df.to_excel(POC_FILE, index=False)
                 st.success("POC details updated!")
 
-        # DELETE TICKETS - only for Super Admin
-        if dept_login == "Super Admin":
             st.header("🗑️ Delete Tickets")
-
             ticket_to_delete = st.selectbox(
                 "Select ticket to delete", options=st.session_state.df["ID"].tolist()
             )
             if st.button("Delete Ticket"):
-                # Confirm delete
                 if ticket_to_delete:
                     st.session_state.df = st.session_state.df[
                         st.session_state.df["ID"] != ticket_to_delete
                     ]
                     st.session_state.df.to_excel(TICKET_FILE, index=False)
                     st.success(f"Ticket {ticket_to_delete} deleted!")
-
     else:
         st.warning("Enter correct admin password to access admin features.")
+
+
+
+import openai
+from openai import OpenAI  # For new client-based usage
+
+# ... inside your chatbot tab ...
+with tabs[2]:
+    st.title("🤖 Ticket Chatbot Assistant")
+
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+
+    def format_df_as_md_table(df):
+        if df.empty:
+            return "No data available."
+        return df.to_markdown(index=False)
+
+    def handle_chat_input(user_input):
+        input_lower = user_input.lower().strip()
+
+        # Handle POC listing
+        if "poc" in input_lower and ("list" in input_lower or "show" in input_lower):
+            return "Here are all the Points of Contact (POCs):", poc_df[["Department", "POC Name", "POC Phone"]]
+
+        # Handle ticket listing
+        elif "ticket" in input_lower and ("list" in input_lower or "show" in input_lower):
+            if st.session_state.df.empty:
+                return "No tickets found.", pd.DataFrame()
+            return f"Here are all the tickets ({len(st.session_state.df)} total):", st.session_state.df[
+                ["ID", "Issue", "Status", "Priority", "Department"]
+            ]
+
+        # Handle ticket status by ID
+        elif "status" in input_lower and "ticket" in input_lower:
+            words = input_lower.split()
+            ticket_ids = [word for word in words if word.startswith("ticket")]
+            if ticket_ids:
+                ticket_id = ticket_ids[0].upper()
+                ticket_row = st.session_state.df[st.session_state.df["ID"] == ticket_id]
+                if not ticket_row.empty:
+                    status = ticket_row.iloc[0]["Status"]
+                    return f"Status of {ticket_id} is **{status}**.", ticket_row[["ID", "Status", "Priority", "Issue","Resolution"]]
+                else:
+                    return f"Ticket ID {ticket_id} not found.", pd.DataFrame()
+            else:
+                return "Please specify a valid Ticket ID (e.g., 'ticket-1101').", pd.DataFrame()
+
+        else:
+            return "Sorry, I didn't understand your query. You can ask things like:\n- 'list all the tickets'\n- 'list all the POCs'\n- 'status of ticket-1101'", pd.DataFrame()
+
+    user_input = st.text_input("Ask me something about tickets or POCs:")
+
+    if user_input:
+        answer_text, answer_df = handle_chat_input(user_input)
+        st.session_state.chat_history.append(("User", user_input))
+        st.session_state.chat_history.append(("Bot", answer_text))
+
+        # Display the conversation
+        for sender, message in st.session_state.chat_history:
+            if sender == "User":
+                st.markdown(f"🧑‍💼 **{sender}:** {message}")
+            else:
+                st.markdown(f"🤖 **{sender}:** {message}")
+        if not answer_df.empty:
+            st.dataframe(answer_df, use_container_width=True)
+
+        if st.button("Clear Chat History"):
+            st.session_state['chat_history'] = []
+            # Display a message to refresh manually because st.experimental_rerun() is missing
+            st.info("Chat history cleared! Please refresh the page to see the changes.")
+
