@@ -9,7 +9,7 @@ import openai
 st.set_page_config(page_title="Support Tickets", page_icon="🎫", layout="wide")
 
 # Departments
-departments = ["Comp", "Mech", "Electronic", "Civil", "IT", "Exam Cell"]
+departments = ["Comp", "Mech", "Electronic", "Civil", "IT", "Exam Cell","Student Dept"]
 TICKET_FILE = "tickets.xlsx"
 POC_FILE = "poc_details.xlsx"
 
